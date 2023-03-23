@@ -5,34 +5,9 @@ import glob
 import os
 import time
 from datetime import datetime
+import multiprocessing
 
 
-################# Location of weather data ################
-
-wd_path = '/home/mpotts32/weather/'
-
-###########################################################
-
-
-################# Database intinitation ###################
-
-# Local host lines for access
-host = 'localhost'
-port = 8086
-username = 'mpotts32'
-password = 'Ttys@210'
-database = 'Trinity'
-
-# Initialize the InfluxDB client and write the points in batches
-client = InfluxDBClient(host = host, port=port, username=username, password=password)
-
-# Create a new database if it does not already exist
-# client.create_database(database)
-
-# Switch to the newly created database
-client.switch_database(database)
-
-################ End of DB Inintiation ####################
 
 # gets the files from the weather database folder
 def get_filenames(file_path):
@@ -59,6 +34,75 @@ def time_epoch_ms(df):
     df['DateTime'] = pd.to_datetime(df['DateTime'], format='%Y-%m-%dT%H:%M:%S.%f')
     #df['DateTime'] = df['DateTime'].astype('int64')
     #print(df['DateTime'])
+
+
+# Function to read
+# last N lines of the file
+def LastNlines(fname, N):
+     
+    # assert statement check
+    # a condition
+    assert N >= 0
+     
+    # declaring variable
+    # to implement
+    # exponential search
+    pos = N + 1
+     
+    # list to store
+    # last N lines
+    lines = []
+     
+    # opening file using with() method
+    # so that file get closed
+    # after completing work
+    with open(fname) as f:
+         
+        # loop which runs
+        # until size of list
+        # becomes equal to N
+        while len(lines) <= N:
+             
+            # try block
+            try:
+                # moving cursor from
+                # left side to
+                # pos line from end
+                f.seek(-pos, 2)
+         
+            # exception block
+            # to handle any run
+            # time error
+            except IOError:
+                f.seek(0)
+                break
+             
+            # finally block
+            # to add lines
+            # to list after
+            # each iteration
+            finally:
+                lines = list(f)
+             
+            # increasing value
+            # of variable
+            # exponentially
+            pos *= 2
+             
+    # returning the
+    # whole list
+    # which stores last
+    # N lines
+    return lines[-N:]
+ 
+
+
+def get_llines_file(file):
+    #print(file)
+    last_lines = LastNlines(file, 2)
+    #print('last_line',last_line)
+    
+    return last_lines
 
 # Read the file into a pandas DataFrame
 def mak_df(file):
@@ -142,41 +186,93 @@ def cre_df_list(file):
 # queries a measuremtn for the last time
 def query_ment_ltimedb(ment):
     #query = f'SELECT last(*) FROM \"{str(ment)}\"'
+
     # Query the last datapoint in the measurement
-    result = client.query(f'SELECT * FROM "{ment}" ORDER BY time DESC LIMIT 1')
-    #print(result)
-    count = result.get_points().__next__().get('time')
-    
-    ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ')
-    print('ltimedb',ltimedb)
-    return ltimedb
+    try:
+        result = client.query(f'SELECT * FROM "{ment}" ORDER BY time DESC LIMIT 1')
+        #print(result)
+        count = result.get_points().__next__().get('time')
+        try:
+            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ')
+        except:
+            pass
+
+        try:
+            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%f')
+        except:
+            pass
+        # 2022-11-18T16:17:07.0
+
+        #print('ltimedb',ltimedb)
+        return ltimedb
+
+    except:
+        return 0
 
 def dps_ment_ltimedps(dps):
     #print(dps)
     arr_ldp = list(dps)[-1]
     
 
-    ltimedps = max(data_points, key=lambda x: x['time'])['time']
-    print('ltimedps',ltimedps)
+    ltimedps = max(dps, key=lambda x: x['time'])['time']
+    #print('ltimedps',ltimedps)
     return ltimedps
+
+def lline_ltime_file(file):
+    ltime_file = str(get_llines_file(file)[0])[167:188]
+    try:
+        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%fZ')
+    except:
+        pass
+
+    try:
+        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%f')
+    except:
+        pass
+    #print('hey', ltime_file)
+    return ltime_file
+
+
+
+def quick_check_files(file,ment):
+    ltimedb = query_ment_ltimedb(ment)
+    
+    # last line of file
+    ltime_file = lline_ltime_file(file)
+    #print('file', ltime_file)
+    #print('db', ltimedb)
+    
+    if ltimedb == ltime_file:#the last line time:
+        # if the last times are the same then dont load whole thing
+        #print('1')
+        return 1
+    else:
+        #print('0')
+        # signal to upload whole file 
+        return 0 
 
 def get_lines_after_ltimedb(dps,ment):
     ltimedb = query_ment_ltimedb(ment)
+
     ltimedps = dps_ment_ltimedps(dps)
-    if ltimedps == ltimedb:
-        print('they match')
+
+    if ltimedb == 0:
+        return dps # if there is no time then the whole set of datapoints is sent to upload
+
+    elif ltimedps == ltimedb:
+        print('No new data to upload')
         return []
 
     elif ltimedps > ltimedb:
-        print('not matching')
+        print('Batch is being generated')
         print(ltimedb)
         ltimedps=ltimedps.to_pydatetime() 
         print(ltimedps) 
 
 
-        dps1 = list(dps)
-        for i in range(len(dps1)):
-            times = str(dps1[i])[77:103]
+        #dps1 = list(dps)
+        for i in range(len(dps)):
+            times = str(dps[i])[77:103]
             if times == str(ltimedb):
                 #print(times)
                 #print(f'row matching is {i}')
@@ -194,9 +290,53 @@ def get_lines_after_ltimedb(dps,ment):
 
 #query_ment_ltime(cov_filename_ment(get_last_file(get_filenames(wd_path))))
 
+def check_all_files():
+    # get list of files
+    arr_files = get_filenames(wd_path)
+    #print(len(arr_files))
+    # for loop through the files
+    err_upload = []
+    for i in range(len(arr_files)):
+        t0 = time.time()
+        ment = cov_filename_ment(arr_files[i])
+        
+        print("A--ment", ment)
+        #print(arr_files[i])
+        if quick_check_files(arr_files[i],ment) == 1:
+            print(f'A--ment: {ment} uploaded already')
+        # quick check if last line = last db
+
+        else:
+            print(f'A--ment: {ment} uploading')
+            data_points = cre_df_list(arr_files[i])
+            
+            upload_points=get_lines_after_ltimedb(data_points,ment)
+
+            print(f'A--Time to load whole file {time.time()-t0}')
+            # upload points
+            t0 = time.time()
+            batch_size = 5000
+            try:
+                for i in range(0, len(upload_points), batch_size):
+
+                    batch = upload_points[i:i+batch_size]
+                    #print(f'batch size {len(batch)}')
+                    
+                    client.write_points(points=batch)
+                    
+            except:
+
+                err_upload.append(f'{ment}:{i}-{i+batch_size}')
+                print(f'A--something failed {ment}')
+                i =+1
+
+            print(f'A--Time to complete {ment}: {time.time()-t0}')
+    print('errors [ment,loc]',err_upload)
+    return print('A--Copmleted backlog data upload')
 
 
 # To Do: 
+
 # itnial process run once at start up check all files and upload all missed data points
 # check / write all the lines prior to the 60 lines if they were not writen
 # check if the database has a measurement
@@ -209,6 +349,7 @@ def get_lines_after_ltimedb(dps,ment):
 
 
 ## Daily uploading (Done without errors and clean up)
+
 ## if there is a measurement check to make sure the last time in the databases matches the last time in the file
 ## get last time from database in that measurement
 ## get last time from file and convert to nanosecods
@@ -226,126 +367,80 @@ def get_lines_after_ltimedb(dps,ment):
 
 # this will be one process
 # write the lines every 60 seconds of the last file last 60 lines with time check for no overlap
+def continous_upload():
+    err = 0
 
-err = 0
+    while err < 5:
+        t0 = time.time()
+        data_points = cre_df_list(get_last_file(get_filenames(wd_path)))
+        ment = cov_filename_ment(get_last_file(get_filenames(wd_path)))
+        print("C--ment", ment)
+        upload_points=get_lines_after_ltimedb(data_points,ment)
+        print(f'C--Time to load whole file {time.time()-t0}')
+        try:
+            if len(upload_points) ==0:
+                time.sleep(56)
 
-while err < 5:
-    t0 = time.time()
-    data_points = cre_df_list(get_last_file(get_filenames(wd_path)))
-    ment = cov_filename_ment(get_last_file(get_filenames(wd_path)))
-    print("ment", ment)
-    upload_points=get_lines_after_ltimedb(data_points,ment)
-    print(f'Time to load whole file {time.time()-t0}')
-    try:
-        if len(upload_points) ==0:
-            time.sleep(56)
-
-        else: 
-            t0 = time.time()
-            batch_size = 5000
-            for i in range(0, len(upload_points), batch_size):
-    
-                batch = upload_points[i:i+batch_size]
-                print(len(batch))
-    
-                client.write_points(points=batch)
-                print(f'Time to upload {time.time()-t0}')
-            time.sleep(56)
-                
-        err = 0
+            else: 
+                t0 = time.time()
+                batch_size = 5000
+                for i in range(0, len(upload_points), batch_size):
         
-    except Exception as e:
+                    batch = upload_points[i:i+batch_size]
+                    print(f'C--batch size {len(batch)}')
         
-        print(f'Error Uploading: {e} at time FIX THIS')
-        # maybe make this a file in the future
-        err =+ 1 # updates the error occured if 5 happen then the program will stop
-        time.sleep(60) # the system waits a minute to continue
-    
+                    client.write_points(points=batch)
+                    print(f'C--Time to upload {time.time()-t0}')
+                time.sleep(56)
+                    
+            err = 0
+            
+        except Exception as e:
+            
+            print(f'C--Error Uploading: {e} at time FIX THIS')
+            # maybe make this a file in the future
+            err =+ 1 # updates the error occured if 5 happen then the program will stop
+            time.sleep(60) # the system waits a minute to continue
+ 
 
 
 
+if __name__ == '__main__':
+
+    ################# Location of weather data ################
+
+    wd_path = '/home/mpotts32/weather/'
+
+    ###########################################################
 
 
+    ################# Database intinitation ###################
 
+    # Local host lines for access
+    host = 'localhost'
+    port = 8086
+    username = 'mpotts32'
+    password = 'Ttys@210'
+    database = 'Trinity'
 
+    # Initialize the InfluxDB client and write the points in batches
+    client = InfluxDBClient(host = host, port=port, username=username, password=password)
 
+    # Create a new database if it does not already exist
+    # client.create_database(database)
 
+    # Switch to the newly created database
+    client.switch_database(database)
 
+    ################ End of DB Inintiation ####################
 
+    p1=multiprocessing.Process(target=check_all_files)
+    p2= multiprocessing.Process(target=continous_upload)
 
+    # start both processes
+    p1.start()
+    p2.start()
 
-
-
-
-
-
-
-
-
-
-'''
-
-
-
-
-
-
-
-
-'Temperature': row['Temperature'],
-            'Dewpoint': row['Dewpoint'],
-            'Absolute_Humidity': row['Absolute_Humidity'],
-            'compassHeading': row['compassHeading'],
-            'WindChill': row['WindChill'],
-            'HeatIndex': row['HeatIndex'],
-            'AirDensity': row['AirDensity'],
-            'WetBulbTempature': row['WetBulbTempature'],
-            'SunRiseTime': row['SunRiseTime'],
-            'SolarNoonTime': row['SolarNoonTime'],
-            'SunsetTime': row['SunsetTime'],
-            'Position of the Sun': row['Position of the Sun'],
-            'Twilight(Civil)': row['Twilight(Civil)']
-
-
-
-
-import pandas as pd
-from influxdb import InfluxDBClient
-
-# Load CSV file into a pandas dataframe
-
-df = pd.read_csv('/home/mpotts32/weather/weather_20230313')
-
-print(df)
-
-# Convert the DataFrame to a dictionary
-data = df.to_dict(orient='records')
-
-# Convert the dictionary to InfluxDB line protocol
-lines = []
-for item in data:
-    tags = ','.join([f'{k}={v}' for k, v in item.items() if k != 'DateTime'])
-    fields = ','.join([f'{k}={v}' for k, v in item.items() if k != 'DateTime' and not pd.isna(v)])
-    line = f'{item["measurement"]},{tags} {fields} {int(item["DateTime"])}'
-    lines.append(line)
-
-# Connect to InfluxDB
-client = InfluxDBClient(host='localhost', port=8086)
-
-# Create a new database if it does not already exist
-client.create_database('my_database')
-
-# Switch to the newly created database
-client.switch_database('my_database')
-
-# Write data to InfluxDB
-client.write('\n'.join(lines),measurement_name='20230313')
-
-print('completed points write')
-
-# Query the database for all data
-result = client.query('SELECT * FROM "measurement_name"')
-
-# Print the query result
-print(result)
-'''
+    # wait for both processes to finish
+    p1.join()
+    p2.join()
