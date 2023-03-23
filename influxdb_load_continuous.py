@@ -35,6 +35,75 @@ def time_epoch_ms(df):
     #df['DateTime'] = df['DateTime'].astype('int64')
     #print(df['DateTime'])
 
+
+# Function to read
+# last N lines of the file
+def LastNlines(fname, N):
+     
+    # assert statement check
+    # a condition
+    assert N >= 0
+     
+    # declaring variable
+    # to implement
+    # exponential search
+    pos = N + 1
+     
+    # list to store
+    # last N lines
+    lines = []
+     
+    # opening file using with() method
+    # so that file get closed
+    # after completing work
+    with open(fname) as f:
+         
+        # loop which runs
+        # until size of list
+        # becomes equal to N
+        while len(lines) <= N:
+             
+            # try block
+            try:
+                # moving cursor from
+                # left side to
+                # pos line from end
+                f.seek(-pos, 2)
+         
+            # exception block
+            # to handle any run
+            # time error
+            except IOError:
+                f.seek(0)
+                break
+             
+            # finally block
+            # to add lines
+            # to list after
+            # each iteration
+            finally:
+                lines = list(f)
+             
+            # increasing value
+            # of variable
+            # exponentially
+            pos *= 2
+             
+    # returning the
+    # whole list
+    # which stores last
+    # N lines
+    return lines[-N:]
+ 
+
+
+def get_llines_file(file):
+    #print(file)
+    last_lines = LastNlines(file, 2)
+    #print('last_line',last_line)
+    
+    return last_lines
+
 # Read the file into a pandas DataFrame
 def mak_df(file):
 
@@ -123,8 +192,17 @@ def query_ment_ltimedb(ment):
         result = client.query(f'SELECT * FROM "{ment}" ORDER BY time DESC LIMIT 1')
         #print(result)
         count = result.get_points().__next__().get('time')
-        
-        ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ')
+        try:
+            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ')
+        except:
+            pass
+
+        try:
+            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%f')
+        except:
+            pass
+        # 2022-11-18T16:17:07.0
+
         #print('ltimedb',ltimedb)
         return ltimedb
 
@@ -139,6 +217,39 @@ def dps_ment_ltimedps(dps):
     ltimedps = max(dps, key=lambda x: x['time'])['time']
     #print('ltimedps',ltimedps)
     return ltimedps
+
+def lline_ltime_file(file):
+    ltime_file = str(get_llines_file(file)[0])[167:188]
+    try:
+        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%fZ')
+    except:
+        pass
+
+    try:
+        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%f')
+    except:
+        pass
+    #print('hey', ltime_file)
+    return ltime_file
+
+
+
+def quick_check_files(file,ment):
+    ltimedb = query_ment_ltimedb(ment)
+    
+    # last line of file
+    ltime_file = lline_ltime_file(file)
+    #print('file', ltime_file)
+    #print('db', ltimedb)
+    
+    if ltimedb == ltime_file:#the last line time:
+        # if the last times are the same then dont load whole thing
+        #print('1')
+        return 1
+    else:
+        #print('0')
+        # signal to upload whole file 
+        return 0 
 
 def get_lines_after_ltimedb(dps,ment):
     ltimedb = query_ment_ltimedb(ment)
@@ -187,28 +298,39 @@ def check_all_files():
     err_upload = []
     for i in range(len(arr_files)):
         t0 = time.time()
-        #print(arr_files[i])
-        data_points = cre_df_list(arr_files[i])
         ment = cov_filename_ment(arr_files[i])
+        
         print("A--ment", ment)
-        upload_points=get_lines_after_ltimedb(data_points,ment)
+        #print(arr_files[i])
+        if quick_check_files(arr_files[i],ment) == 1:
+            print(f'A--ment: {ment} uploaded already')
+        # quick check if last line = last db
 
-        print(f'A--Time to load whole file {time.time()-t0}')
-        # upload points
-        t0 = time.time()
-        batch_size = 5000
-        for i in range(0, len(upload_points), batch_size):
+        else:
+            print(f'A--ment: {ment} uploading')
+            data_points = cre_df_list(arr_files[i])
+            
+            upload_points=get_lines_after_ltimedb(data_points,ment)
 
-            batch = upload_points[i:i+batch_size]
-            #print(f'batch size {len(batch)}')
+            print(f'A--Time to load whole file {time.time()-t0}')
+            # upload points
+            t0 = time.time()
+            batch_size = 5000
             try:
-                client.write_points(points=batch)
-                
+                for i in range(0, len(upload_points), batch_size):
+
+                    batch = upload_points[i:i+batch_size]
+                    #print(f'batch size {len(batch)}')
+                    
+                    client.write_points(points=batch)
+                    
             except:
+
                 err_upload.append(f'{ment}:{i}-{i+batch_size}')
                 print(f'A--something failed {ment}')
+                i =+1
 
-        print(f'A--Time to complete {ment}: {time.time()-t0}')
+            print(f'A--Time to complete {ment}: {time.time()-t0}')
     print('errors [ment,loc]',err_upload)
     return print('A--Copmleted backlog data upload')
 
