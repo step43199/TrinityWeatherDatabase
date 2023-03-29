@@ -190,7 +190,7 @@ def query_ment_ltimedb(ment):
     # Query the last datapoint in the measurement
     try:
         result = client.query(f'SELECT * FROM "{ment}" ORDER BY time DESC LIMIT 1')
-        #print(result)
+        #   print(result)
         count = result.get_points().__next__().get('time')
         try:
             ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ')
@@ -239,8 +239,8 @@ def quick_check_files(file,ment):
     
     # last line of file
     ltime_file = lline_ltime_file(file)
-    #print('file', ltime_file)
-    #print('db', ltimedb)
+    print('file', ltime_file)
+    print('db', ltimedb)
     
     if ltimedb == ltime_file:#the last line time:
         # if the last times are the same then dont load whole thing
@@ -308,29 +308,39 @@ def check_all_files():
 
         else:
             print(f'A--ment: {ment} uploading')
-            data_points = cre_df_list(arr_files[i])
-            
-            upload_points=get_lines_after_ltimedb(data_points,ment)
-
-            print(f'A--Time to load whole file {time.time()-t0}')
-            # upload points
-            t0 = time.time()
-            batch_size = 5000
             try:
-                for i in range(0, len(upload_points), batch_size):
+                data_points = cre_df_list(arr_files[i])
+            
+                upload_points=get_lines_after_ltimedb(data_points,ment)
 
-                    batch = upload_points[i:i+batch_size]
-                    #print(f'batch size {len(batch)}')
-                    
-                    client.write_points(points=batch)
-                    
+                print(f'A--Time to load whole file {time.time()-t0}')
+
+                # upload points
+                t0 = time.time()
+                batch_size = 5000
+                try:
+                    for i in range(0, len(upload_points), batch_size):
+
+                        batch = upload_points[i:i+batch_size]
+                        #print(f'batch size {len(batch)}')
+                        
+                        client.write_points(points=batch)
+                    print(f'A--Time to complete {ment}: {time.time()-t0}')
+                        
+                except:
+
+                    err_upload.append(f'{ment}:{i}-{i+batch_size}')
+                    print(f'A--something failed upload {ment}')
+                    i =+1
+            
             except:
+                err_upload.append(f'{ment}: creating data points failed')
+                print(f'A--something failed loading data {ment}')
+                i =+1     
 
-                err_upload.append(f'{ment}:{i}-{i+batch_size}')
-                print(f'A--something failed {ment}')
-                i =+1
 
-            print(f'A--Time to complete {ment}: {time.time()-t0}')
+
+            
     print('errors [ment,loc]',err_upload)
     return print('A--Copmleted backlog data upload')
 
