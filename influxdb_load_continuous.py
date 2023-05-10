@@ -31,6 +31,21 @@
 ##########################################################
 
 ##########################################################
+############### Error Correction #########################
+## if an error as such appears 
+## 400: {"error":"partial write: field type conflict: input field \"Position of the Sun\" on measurement \"20230416\" is type float, already exists as type integer dropped=3066"}
+## delete the measurement that was attempted to be uploaded and then check to make sure df.fillna(0.0,....) is a floating value. This means that the dtyps switched in the middle
+## of the weather data file. how to drop a measurement ----> Influx, use Trinity, drop measurement "20230427"
+## 
+## The weather data system sometimes does not produce a full data row which caused the program to crash. To fix this I made a def remove_incomplete_lines(f_path, num_col) to remove
+## all the bad lines based on the number of commas. When they dont match the row is not saved and when the row commas match then the row is saved to a temp file that is then re-uploaded
+## to the panda df. The temp file is then deleted after the df is loaded in. This is implemented on the continous and single load codes. 
+##########################################################
+
+
+
+
+##########################################################
 ############ Installation Instructions ###################
 # For installation make sure influxdb is installed in the terminal
 # you can check this by running "influx"
@@ -51,6 +66,7 @@ import os
 import time
 from datetime import datetime
 import multiprocessing
+import csv
 
 
 
@@ -60,6 +76,10 @@ import multiprocessing
 # Returns: array of files paths
 def get_filenames(folder_path):
     arr_filenames = glob.glob(wd_path + '//*')
+    
+    arr_filenames.remove(f'{folder_path}update.sh')
+    arr_filenames.remove(f'{folder_path}TrinityWeatherDatabase')
+    arr_filenames.remove(f'{folder_path}weather_20230301')
     #print(arr_filenames)
     return arr_filenames
 
@@ -164,6 +184,29 @@ def get_llines_file(file):
     
     return last_lines
 
+
+# this def removes all of the lines that are not the correct column length based on the correct number of commas
+# takes: file path and the number of columns
+# Returns: nothing (but it creates a file for the pandas data from to upload)
+def remove_incomplete_lines(f_path, num_col):
+    # opens the measurement file
+    with open(f_path, 'r') as file: 
+        reader=csv.reader(file)
+
+        valid_lines= []
+
+        # goes through line by line
+        for line in reader: 
+            # checks each line for the amount of commas and if its not correct does not append it
+            if str(line).count(',') == num_col-1:
+                
+                valid_lines.append(line)
+
+# puts them all to a new corrected file
+    with open(f'{f_path}c','w',newline='') as output_file:
+        writer = csv.writer(output_file)
+        writer.writerows(valid_lines)
+
 # Read the file into a pandas DataFrame
 # Takes: a single file
 # Returns: Dataframe
@@ -182,8 +225,70 @@ def mak_df(file):
         "Position of the Sun", "Twilight(Civil)","Twilight(Nautical)",
         "Twilight(Astronomical)", "X_Tilt", "Y_Tilt", "Z_Orientation", "User_Information_Field",
         "DateTime","Supply_Voltage", "Status", "Checksum"]
-    df = pd.read_csv(file, names=header)
-    time_epoch_ms(df) # convert to datetime object for the datetime column
+    
+    
+    remove_incomplete_lines(file, len(header)) # gets only completed rows from the file 
+    df = pd.read_csv(f'{file}c', names=header,low_memory=False) # reads in the corrected file 
+    os.remove(f'{file}c') # deleted the corrected file
+
+    time_epoch_ms(df) # covert to datetime object for the datetime column
+
+
+    # this is needed so that each column can get the correct dtype
+    df['Node'].fillna(str(0),inplace= True)
+    df['RelativeWindDirection'].fillna(int(0),inplace= True)
+    df['RelativeWindSpeed'].fillna(float(0),inplace= True)
+    df['CorrectedWindDirection'].fillna(int(0),inplace= True)
+
+    df['AverageRelativeWindDirection'].fillna(int(0),inplace= True)
+
+    df['AverageRelativeWindSpeed'].fillna(int(0),inplace= True)
+    df['RelativeGustDirection'].fillna(int(0),inplace= True)
+    df['RelativeGustSpeed'].fillna(float(0),inplace= True)
+
+    df['AverageCorrectedWindDirection'].fillna(int(0),inplace= True)
+
+    df['WindSensorStatus'].fillna(int(0),inplace= True)
+    df['Pressure'].fillna(float(0),inplace= True)
+    df['Pressure_at_Sea_level'].fillna(float(0),inplace= True)
+    df['Pressure_at_Station'].fillna(float(0),inplace= True)
+    df['Relative_Humidity'].fillna(int(0),inplace= True)
+
+    df['Temperature'].fillna(float(0),inplace= True)
+    df['Dewpoint'].fillna(float(0),inplace= True)
+
+    df['Absolute_Humidity'].fillna(float(0),inplace= True)
+    df['compassHeading'].fillna(int(0),inplace= True)
+    df['WindChill'].fillna(float(0),inplace= True)
+    df['HeatIndex'].fillna(float(0),inplace= True)
+    df['AirDensity'].fillna(float(0),inplace= True)
+    df['WetBulbTempature'].fillna(float(0),inplace= True)
+
+    df['SunRiseTime'].fillna(str(0),inplace= True)
+    df['SolarNoonTime'].fillna(str(0),inplace= True)
+    df['SunsetTime'].fillna(str(0),inplace= True)
+
+    df['Position of the Sun'].fillna(str(0),inplace= True)
+    df['Twilight(Civil)'].fillna(str(0),inplace= True)
+
+
+    df['Twilight(Nautical)'].fillna(str(0),inplace= True)
+
+    df['Twilight(Astronomical)'].fillna(str(0),inplace= True)
+    df['X_Tilt'].fillna(int(0),inplace= True)
+    df['Y_Tilt'].fillna(int(0),inplace= True)
+    df['Z_Orientation'].fillna(int(0),inplace= True)
+    df['User_Information_Field'].fillna(float(0),inplace= True)
+
+
+    df['Supply_Voltage'].fillna(float(0),inplace= True)
+    df['Status'].fillna(int(0),inplace= True)
+    df['Checksum'].fillna(str(0),inplace= True)
+
+
+
+
+    #print(df.loc[:,"DateTime"])
     return df
 
 # Create a list/dictionary of data points from the DataFrame this is needed to uplaod to influxdb
@@ -217,8 +322,8 @@ def cre_df_list(file):
                     'Temperature': row['Temperature'],
                     'Dewpoint': row['Dewpoint'],
                     'Absolute_Humidity': row['Absolute_Humidity'],
-                    #'WindChill': row['WindChill'], # these lines have no data and it messes everything up
-                    #'HeatIndex': row['HeatIndex'],
+                    'WindChill': row['WindChill'], # these lines have no data and it messes everything up
+                    'HeatIndex': row['HeatIndex'],
                     'compassHeading': row['compassHeading'],
                     'AirDensity': row['AirDensity'],
                     'WetBulbTempature': row['WetBulbTempature'],
@@ -232,7 +337,7 @@ def cre_df_list(file):
                     'X_Tilt': row['X_Tilt'],
                     'Y_Tilt': row['Y_Tilt'],
                     'Z_Orientation': row['Z_Orientation'],
-                    #'User_Information_Field': row['User_Information_Field'],
+                    'User_Information_Field': row['User_Information_Field'],
                     'Supply_Voltage': row['Supply_Voltage'],
                     'Status': row['Status'],
                     'Checksum': row['Checksum']
@@ -251,12 +356,14 @@ def query_ment_ltimedb(ment):
     # Query the last datapoint in the measurement
     try:
         result = client.query(f'SELECT * FROM "{ment}" ORDER BY time DESC LIMIT 1') # query the database for a measurement
-        #   print(result)
+        #print(result)
         count = result.get_points().__next__().get('time') # gets just the time out of all the columns in the last line
-
+        if count[-1] == 'Z':
+            #print(count[:-1])
+            count = count[:-1]
         # Definity needs to be edited to work better for
         try:
-            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%fZ') # converts to a datetime object
+            ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S') # converts to a datetime object
         except:
             pass
 
@@ -264,12 +371,13 @@ def query_ment_ltimedb(ment):
             ltimedb = datetime.strptime(count, '%Y-%m-%dT%H:%M:%S.%f') # converts to a datetime object
         except:
             pass
+        #print("ltimedb",ltimedb)
         # 2022-11-18T16:17:07.0
 
         #print('ltimedb',ltimedb)
         return ltimedb
 
-    except: # this is when there is no measurement in the database so it returns 0
+    except: # this is when there is no measurement / no connection in the database so it returns 0
         return 0
 
 # datapoints(from a file) for a measurement last time
@@ -279,7 +387,12 @@ def dps_ment_ltimedps(dps):
     #print(dps)
     arr_ldp = list(dps)[-1] # I think this is not nessasary
 
-    ltimedps = max(dps, key=lambda x: x['time'])['time'] # gets the last time of the database
+    try:
+        ltimedps = max(dps, key=lambda x: x['time'])['time'] # gets the last time of the database
+    except Exception as e:
+        
+        #print(e)
+        ltimedps = 0
     #print('ltimedps',ltimedps)
     return ltimedps
 
@@ -287,18 +400,26 @@ def dps_ment_ltimedps(dps):
 # takes: file paath
 # Returns: datatime object time.
 def lline_ltime_file(file):
-    ltime_file = str(get_llines_file(file)[0])[167:188] # converts the line to a string and then gets just the time section
-    try:
-        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%fZ')
-    except:
-        pass
+    ltime_file_array = str(get_llines_file(file)[0]).split(',')#[167:188] # converts the line to a string and then gets just the time section
+    #print('ltime_file_array',ltime_file_array)
+    if len(ltime_file_array) > 33:
+        ltime_file = ltime_file_array[33]
+        #print('ltime_file' , ltime_file)
 
-    try:
-        ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%f')
-    except:
+        try:
+            ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%fZ')
+        except:
+            pass
+
+        try:
+            ltime_file = datetime.strptime(ltime_file, '%Y-%m-%dT%H:%M:%S.%f')
+        except:
+            pass
+        #print('hey', ltime_file)
+        return ltime_file
+    else:
         pass
-    #print('hey', ltime_file)
-    return ltime_file
+    
 
 
 # checks the backlog dates to see if they have been uploaded by checking the last time.
@@ -309,9 +430,12 @@ def quick_check_files(file,ment):
     ltimedb = query_ment_ltimedb(ment)
     
     # last line of file
-    ltime_file = lline_ltime_file(file)
-    print('file', ltime_file) # shows the times
-    print('db', ltimedb)
+    try:
+        ltime_file = lline_ltime_file(file)
+    except:
+        ltime_file = 0
+    #print('file', ltime_file) # shows the times
+    #print('db', ltimedb)
     
     if ltimedb == ltime_file:#the last line time:
         # if the last times are the same then dont load whole thing
@@ -337,11 +461,16 @@ def get_lines_after_ltimedb(dps,ment):
         print('No new data to upload')
         return []
 
+    elif ltimedps < ltimedb:
+        print("ERROR: Data may not have completed line")
+
     elif ltimedps > ltimedb: # needs to get all the extra data points no in the database and prepare the array
         print('Batch is being generated')
-        print(ltimedb)
+        print(f'db: {ltimedb} and file: {ltimedps}')
         ltimedps=ltimedps.to_pydatetime() # makes it a datetime.object
-        print(ltimedps) 
+
+
+        
 
 
         #dps1 = list(dps)
@@ -378,7 +507,7 @@ def check_all_files():
         t0 = time.time()
         ment = cov_filename_ment(arr_files[i]) # gets the measurent
         
-        print("A--ment", ment) # shows this is process is 2
+        #print("A--ment", ment) # shows this is process is 2
         #print(arr_files[i])
         # when the quick_check_files returned 1 it was already uploaded
         if quick_check_files(arr_files[i],ment) == 1:
@@ -406,8 +535,8 @@ def check_all_files():
                         client.write_points(points=batch) # writes points to the database
                     print(f'A--Time to complete {ment}: {time.time()-t0}')
                         
-                except:
-
+                except Exception as e: 
+                    print(e)
                     err_upload.append(f'{ment}:{i}-{i+batch_size}') # updates the error for printing later
                     print(f'A--something failed upload {ment}')
                     i =+1 # updated to the next i
@@ -420,7 +549,7 @@ def check_all_files():
 
 
             
-    print('errors [ment,loc]',err_upload)
+    print('errors [ment,loc]:',err_upload)
     return print('A--Copmleted backlog data upload')
 
 # this will be process one
@@ -456,7 +585,7 @@ def continous_upload():
             
         except Exception as e:
             
-            print(f'C--Error Uploading: {e} at time {time.now()}')
+            print(f'C--Error Uploading: {e} at time {time.time()}')
             # maybe make this a file in the future
             err =+ 1 # updates the error occured if 5 happen then the program will stop
             time.sleep(60) # the system waits a minute to continue

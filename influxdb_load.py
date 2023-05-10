@@ -4,6 +4,8 @@ import numpy as np
 import glob
 import os
 import time
+import datetime
+import csv
 
 # Local host lines for access
 host = 'localhost'
@@ -15,11 +17,20 @@ database = 'Trinity'
 wd_path = '/home/mpotts32/weather/'
 
 # Get the last file in the directory
-last_file = max(glob.glob(wd_path + '//*'), key=os.path.getctime)
+#last_file = max(glob.glob(wd_path + '//*'), key=os.path.getctime)
 #print('file', last_file)
-measurement = last_file[-8:]
+#measurement = last_file[-8:]
+
+# gets a single file
+file_ = f'{wd_path}weather_20230410'
+measurement = file_[-8:]
 print('measurement',measurement)
 
+def time_epoch_ms(df):
+    df['DateTime'] = pd.to_datetime(df['DateTime'], format='%Y-%m-%dT%H:%M:%S.%f')
+    #df['DateTime'] = df['DateTime'].astype('int64')
+    print(df['DateTime'])
+    
 
 
 # Read the file into a pandas DataFrame
@@ -38,10 +49,113 @@ header = [
     "Twilight(Astronomical)", "X_Tilt", "Y_Tilt", "Z_Orientation", "User_Information_Field",
     "DateTime",
     "Supply_Voltage", "Status", "Checksum"]
-df = pd.read_csv(last_file, names=header)
-df['DateTime'] = pd.to_datetime(df['DateTime'], format='%Y%m%dT%H:%M:%S').astype(np.int64) // 10**6
-df = df.astype({'User_Information_Field':'string'})
 
+# this def removes all of the lines that are not the correct column length based on the correct number of commas
+# takes: file path and the number of columns
+# Returns: nothing (but it creates a file for the pandas data from to upload)
+def remove_incomplete_lines(f_path, num_col):
+    # opens the file
+    with open(f_path, 'r') as file: 
+        reader=csv.reader(file)
+
+        valid_lines= []
+
+        for line in reader: 
+            # checks each line for the amount of commas and if its not correct does not append it
+            if str(line).count(',') == num_col-1:
+                
+                valid_lines.append(line)
+
+# puts them all to a new corrected file
+    with open(f'{file_}c','w',newline='') as output_file:
+        writer = csv.writer(output_file)
+        writer.writerows(valid_lines)
+
+       
+
+# loads the data
+#df = pd.read_csv(file_, names=header,low_memory=False)
+
+
+    
+
+#print(df)
+# trys to get the data switched to nano seconds if not then the code will see if there are incomplete lines and delete them 
+#try:
+#    time_epoch_ms(df)
+
+#except: 
+print('removing incomplete lines')
+# gets the ccompleted columns only
+remove_incomplete_lines(file_, 37)
+df = pd.read_csv(f'{file_}c', names=header,low_memory=False)
+os.remove(f'{file_}c')
+time_epoch_ms(df)
+
+# this is needed so that each column can get the correct dtype
+df['Node'].fillna(str(0),inplace= True)
+df['RelativeWindDirection'].fillna(int(0),inplace= True)
+df['RelativeWindSpeed'].fillna(float(0),inplace= True)
+df['CorrectedWindDirection'].fillna(int(0),inplace= True)
+
+df['AverageRelativeWindDirection'].fillna(int(0),inplace= True)
+
+df['AverageRelativeWindSpeed'].fillna(int(0),inplace= True)
+df['RelativeGustDirection'].fillna(int(0),inplace= True)
+df['RelativeGustSpeed'].fillna(float(0),inplace= True)
+
+df['AverageCorrectedWindDirection'].fillna(int(0),inplace= True)
+
+df['WindSensorStatus'].fillna(int(0),inplace= True)
+df['Pressure'].fillna(float(0),inplace= True)
+df['Pressure_at_Sea_level'].fillna(float(0),inplace= True)
+df['Pressure_at_Station'].fillna(float(0),inplace= True)
+df['Relative_Humidity'].fillna(int(0),inplace= True)
+
+df['Temperature'].fillna(float(0),inplace= True)
+df['Dewpoint'].fillna(float(0),inplace= True)
+
+df['Absolute_Humidity'].fillna(float(0),inplace= True)
+df['compassHeading'].fillna(int(0),inplace= True)
+df['WindChill'].fillna(float(0),inplace= True)
+df['HeatIndex'].fillna(float(0),inplace= True)
+df['AirDensity'].fillna(float(0),inplace= True)
+df['WetBulbTempature'].fillna(float(0),inplace= True)
+
+df['SunRiseTime'].fillna(str(0),inplace= True)
+df['SolarNoonTime'].fillna(str(0),inplace= True)
+df['SunsetTime'].fillna(str(0),inplace= True)
+
+df['Position of the Sun'].fillna(str(0),inplace= True)
+df['Twilight(Civil)'].fillna(str(0),inplace= True)
+
+
+df['Twilight(Nautical)'].fillna(str(0),inplace= True)
+
+df['Twilight(Astronomical)'].fillna(str(0),inplace= True)
+df['X_Tilt'].fillna(int(0),inplace= True)
+df['Y_Tilt'].fillna(int(0),inplace= True)
+df['Z_Orientation'].fillna(int(0),inplace= True)
+df['User_Information_Field'].fillna(float(0),inplace= True)
+
+
+df['Supply_Voltage'].fillna(float(0),inplace= True)
+df['Status'].fillna(int(0),inplace= True)
+df['Checksum'].fillna(str(0),inplace= True)
+
+
+
+
+#df.info() shows what the columns should be named
+
+
+
+#df.fillna(0.0,inplace=True)
+print(df['HeatIndex'])
+
+
+
+#print(df['HeatIndex'])
 # Create a list of data points from the DataFrame
 data_points = []
 
@@ -68,8 +182,8 @@ for index, row in df.iterrows():
             'Temperature': row['Temperature'],
             'Dewpoint': row['Dewpoint'],
             'Absolute_Humidity': row['Absolute_Humidity'],
-            #'WindChill': row['WindChill'],
-            #'HeatIndex': row['HeatIndex'],
+            'WindChill': row['WindChill'], # these lines have no data and it messes everything up
+            'HeatIndex': row['HeatIndex'],
             'compassHeading': row['compassHeading'],
             'AirDensity': row['AirDensity'],
             'WetBulbTempature': row['WetBulbTempature'],
@@ -83,13 +197,14 @@ for index, row in df.iterrows():
             'X_Tilt': row['X_Tilt'],
             'Y_Tilt': row['Y_Tilt'],
             'Z_Orientation': row['Z_Orientation'],
-            #'User_Information_Field': row['User_Information_Field'],
+            'User_Information_Field': row['User_Information_Field'],
             'Supply_Voltage': row['Supply_Voltage'],
             'Status': row['Status'],
             'Checksum': row['Checksum']
        }
     }
     data_points.append(data_point)
+
 
 # Initialize the InfluxDB client and write the points in batches
 client = InfluxDBClient(host = host, port=port, username=username, password=password)
@@ -100,18 +215,18 @@ client = InfluxDBClient(host = host, port=port, username=username, password=pass
 # Switch to the newly created database
 client.switch_database(database)
 
-batch_size = 4999
+batch_size = 5000
 t0 = time.time()
 for i in range(0, len(data_points), batch_size):
     
     batch = data_points[i:i+batch_size]
-    
+    #print(batch)
     
     client.write_points(points=batch)
     print(f'Time to upload {time.time()-t0}')
     
     
-print(f"Uploaded {len(df)} points from {last_file}. Complete. Return to the InfluxDB UI.")
+print(f"Uploaded {len(df)} points from {file_}. Complete. Return to the InfluxDB UI.")
 
 
 
