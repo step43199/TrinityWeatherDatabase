@@ -22,14 +22,14 @@ wd_path = '/home/mpotts32/weather/'
 #measurement = last_file[-8:]
 
 # gets a single file
-file_ = f'{wd_path}weather_20230410'
+file_ = f'{wd_path}weather_20230716'
 measurement = file_[-8:]
 print('measurement',measurement)
 
 def time_epoch_ms(df):
     df['DateTime'] = pd.to_datetime(df['DateTime'], format='%Y-%m-%dT%H:%M:%S.%f')
     #df['DateTime'] = df['DateTime'].astype('int64')
-    print(df['DateTime'])
+    #print(df['DateTime'])
     
 
 
@@ -50,6 +50,28 @@ header = [
     "DateTime",
     "Supply_Voltage", "Status", "Checksum"]
 
+
+# Counts the number of commas in a line. Some lines contian null values this removes them. 
+# Paramters: the file and the number of col there should be
+# Returns: All the lines that have the correct number of columns
+def comma_count(file,num_col):
+    valid_lines= []
+
+    while True:
+        try:
+            row = next(file)
+            # checks each line for the amount of commas and if its not correct does not append it
+            if str(row).count(',') == num_col-1:
+                    
+                valid_lines.append(row)
+        except csv.Error:
+            continue
+        except StopIteration:
+            break
+
+    return valid_lines
+
+
 # this def removes all of the lines that are not the correct column length based on the correct number of commas
 # takes: file path and the number of columns
 # Returns: nothing (but it creates a file for the pandas data from to upload)
@@ -57,14 +79,11 @@ def remove_incomplete_lines(f_path, num_col):
     # opens the file
     with open(f_path, 'r') as file: 
         reader=csv.reader(file)
-
-        valid_lines= []
-
-        for line in reader: 
-            # checks each line for the amount of commas and if its not correct does not append it
-            if str(line).count(',') == num_col-1:
-                
-                valid_lines.append(line)
+        
+        #print(reader)
+        
+        valid_lines=comma_count(reader,num_col)
+        
 
 # puts them all to a new corrected file
     with open(f'{file_}c','w',newline='') as output_file:
@@ -91,7 +110,7 @@ remove_incomplete_lines(file_, 37)
 df = pd.read_csv(f'{file_}c', names=header,low_memory=False)
 os.remove(f'{file_}c')
 time_epoch_ms(df)
-
+print(df)
 # this is needed so that each column can get the correct dtype
 df['Node'].fillna(str(0),inplace= True)
 df['RelativeWindDirection'].fillna(int(0),inplace= True)
@@ -104,7 +123,7 @@ df['AverageRelativeWindSpeed'].fillna(int(0),inplace= True)
 df['RelativeGustDirection'].fillna(int(0),inplace= True)
 df['RelativeGustSpeed'].fillna(float(0),inplace= True)
 
-df['AverageCorrectedWindDirection'].fillna(int(0),inplace= True)
+df['AverageCorrectedWindDirection'].fillna(float(0),inplace= True)
 
 df['WindSensorStatus'].fillna(int(0),inplace= True)
 df['Pressure'].fillna(float(0),inplace= True)
@@ -150,8 +169,8 @@ df['Checksum'].fillna(str(0),inplace= True)
 
 
 
-#df.fillna(0.0,inplace=True)
-print(df['HeatIndex'])
+df.fillna(0.0,inplace=True)
+#print(df['HeatIndex'])
 
 
 
@@ -314,3 +333,4 @@ result = client.query('SELECT * FROM "measurement_name"')
 # Print the query result
 print(result)
 '''
+
