@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 #######################################################
 #######################################################
 ########### Trinity Weather Database Upload ###########
@@ -514,19 +515,27 @@ def get_lines_after_ltimedb(dps,ment):
     else:
         print('Error? in get_lines_after_ltimedb ')
 
+
 # uploads teh data using influx db
 # Parameters: upload  points, ment- how many lines are being uploaded
 def upload_data(upload_points,ment):
     # upload points in batches in 5000
     t0 = time.time()
     batch_size = 5000
-    for i in range(0, len(upload_points), batch_size):
+    try:
+        for i in range(0, len(upload_points), batch_size):
 
-        batch = upload_points[i:i+batch_size]
-        #print(f'batch size {len(batch)}')
-        
-        client.write_points(points=batch) # writes points to the database
-    print(f'A--Time to complete {ment}: {time.time()-t0}')
+            batch = upload_points[i:i+batch_size]
+            #print(f'batch size {len(batch)}')
+            
+            client.write_points(points=batch) # writes points to the database
+        print(f'A--Time to complete {ment}: {time.time()-t0}')
+    except Exception as e: 
+        print(e)
+        err_upload.append(f'{ment}:{i}-{i+batch_size}') # updates the error for printing later
+        print(f'A--something failed upload {ment}')
+        #i =+1 # updated to the next i
+
 
 #query_ment_ltime(cov_filename_ment(get_last_file(get_filenames(wd_path))))
 # check all the files script to run through the second process
@@ -552,38 +561,40 @@ def check_all_files():
         # if it is 0 then the whole file needs to be uploaded
         else:
             print(f'A--ment: {ment} uploading')
-            try:
-                data_points = cre_df_list(arr_files[i]) # gets the datapoints
+            # try:
+            data_points = cre_df_list(arr_files[i]) # gets the datapoints
 
-                if data_points != []:
-                    #print(data_points[0])
-                
-                    upload_points=get_lines_after_ltimedb(data_points,ment) # gets the lines that need to be uploaded
-                    #print(upload_points)
-                    print(f'A--Time to load whole file {time.time()-t0}')
-                    
-                    try:
-                        upload_data(upload_points,ment)
-                            
-                    except Exception as e: 
-                        print(e)
-                        err_upload.append(f'{ment}:{i}-{i+batch_size}') # updates the error for printing later
-                        print(f'A--something failed upload {ment}')
-                        i =+1 # updated to the next i
-                else:
-                    print(f'A--{ment} is a blank file')
-                    err_upload.append(f'{ment}: blank file')
+            if data_points != []:
+                #print(data_points[0])
             
-            except:
-                err_upload.append(f'{ment}: creating data points failed')
-                print(f'A--something failed loading data {ment}')
-                i =+1     
+                upload_points=get_lines_after_ltimedb(data_points,ment) # gets the lines that need to be uploaded
+                #print(upload_points)
+                print(f'A--Time to load whole file {time.time()-t0}')
+                
+                try:
+                    upload_data(upload_points,ment)
+                except:
+                    
+                    query = f'DROP MEASUREMENT "{ment}"'
+                    client.query(query)
+                    upload_data(data_points, ment)
+                        
+            else:
+                print(f'A--{ment} is a blank file')
+                err_upload.append(f'{ment}: blank file')
+            
+            # except:
+            #     err_upload.append(f'{ment}: creating data points failed')
+            #     print(f'A--something failed loading data {ment}')
+            #     i =+1     
 
 
 
             
     print('errors [ment,loc]:',err_upload)
     return print('A--Copmleted backlog data upload')
+
+
 
 # this will be process one
 # write the lines every 60 seconds of the last file last 60 lines with time check for no overlap
@@ -609,9 +620,16 @@ def continous_upload():
         
                     batch = upload_points[i:i+batch_size] # created the points to upload
                     print(f'C--batch size {len(batch)}')
-        
-                    client.write_points(points=batch) # uploads to database
-                    print(f'C--Time to upload {time.time()-t0}')
+                    try: 
+                        client.write_points(points=batch) # writes points to the database
+                    except:
+                        query = f'DROP MEASUREMENT "{ment}"'
+                        client.query(query)
+                        print('Please wait an error in loading occred should be resolved in 1 minute')
+                    
+                        
+                    #client.write_points(points=batch) # uploads to database
+                    #print(f'C--Time to upload {time.time()-t0}')
                 time.sleep(56) # wait a bit
                     
             err = 0 # resets the error

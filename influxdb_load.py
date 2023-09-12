@@ -22,7 +22,7 @@ wd_path = '/home/mpotts32/weather/'
 #measurement = last_file[-8:]
 
 # gets a single file
-file_ = f'{wd_path}weather_20230716'
+file_ = f'{wd_path}weather_20230911'
 measurement = file_[-8:]
 print('measurement',measurement)
 
@@ -228,22 +228,26 @@ for index, row in df.iterrows():
 # Initialize the InfluxDB client and write the points in batches
 client = InfluxDBClient(host = host, port=port, username=username, password=password)
 
+
+
 # Create a new database if it does not already exist
 # client.create_database(database)
 
 # Switch to the newly created database
 client.switch_database(database)
+query = f'DROP MEASUREMENT "{measurement}"'
+client.query(query)
 
 batch_size = 5000
 t0 = time.time()
+
 for i in range(0, len(data_points), batch_size):
     
     batch = data_points[i:i+batch_size]
     #print(batch)
-    
-    client.write_points(points=batch)
+    client.write_points(points=batch) # writes points to the database
     print(f'Time to upload {time.time()-t0}')
-    
+
     
 print(f"Uploaded {len(df)} points from {file_}. Complete. Return to the InfluxDB UI.")
 
