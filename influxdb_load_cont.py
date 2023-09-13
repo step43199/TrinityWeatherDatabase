@@ -67,11 +67,11 @@ import numpy as np
 import glob
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import multiprocessing
 import csv
-
-
+import smtplib, ssl
+from email.message import EmailMessage
 
 
 # gets all the files from the weather database folder
@@ -604,7 +604,12 @@ def continous_upload():
 
     while err < 5: # as long as an error has not happened  5 times in a row the code continues to run (aka maybe no innternet connection)
         t0 = time.time()
-        data_points = cre_df_list(get_last_file(get_filenames(wd_path)))
+        try:
+            data_points = cre_df_list(get_last_file(get_filenames(wd_path)))
+        except:
+            time.sleep(2)
+            data_points = mak_df(get_last_file(get_filenames(wd_path)))
+
         ment = cov_filename_ment(get_last_file(get_filenames(wd_path)))
         print("C--ment", ment) # second processes
         upload_points=get_lines_after_ltimedb(data_points,ment) # points that need to be uploaded
@@ -642,7 +647,79 @@ def continous_upload():
             time.sleep(60) # the system waits a minute to continue
  
 
+def send_email():
+    port = 465  # For starttls
+    smtp_server = "smtp.gmail.com"
+    sender_email = "sofiastepanoff22@gmail.com"
+    receiver_email = "sofiastepanoff@gatech.edu"
+    password = 'jjxqrdecssjizosh'
+    
+    # Set the subject and body of the email
+    subject = 'Check Weather Station'
+    body = """
+    Python thinks there is a problem with the weather station
+    """
 
+    em = EmailMessage()
+    em['From'] = sender_email
+    em['To'] = receiver_email
+    em['Subject'] = subject
+    em.set_content(body)
+
+
+    context = ssl.create_default_context()
+    #server.starttls(context=context)
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as server:
+        server.ehlo()
+        
+        server.login(sender_email, password)
+        server.sendmail(sender_email, receiver_email, em.as_string())
+        server.close()
+        print('successfully sent the mail')
+    
+
+
+def check_weatherstation_operations():
+    
+    while True: 
+        current = datetime.utcnow()
+        #print(current)
+        ment = cov_filename_ment(get_last_file(get_filenames(wd_path)))
+        if current.hour ==0 and current.minute == 50:
+            time.sleep(60) # skips the minute where the weather station is transistion to the new date
+        elif current.hour < 1 and current.minute < 50:
+            current = current + timedelta(days=1) 
+        month = current.strftime('%m')
+        current_date=f'{current.year}{month}{current.day}' 
+        #print(current_date)
+
+        print('Checking weatherdata file lengths to ensure the weatherstation is operational\n')
+
+        try:
+            data_points = mak_df(get_last_file(get_filenames(wd_path)))
+        except:
+            time.sleep(2)
+            data_points = mak_df(get_last_file(get_filenames(wd_path)))
+
+        try:
+            len_df = len(data_points)
+        except:
+            print('empty dataFrame')
+            len_df = 0
+
+        expected_lines = current.hour * 3600 + 1 # alwasy have some times
+
+        if len_df < expected_lines:
+            print('restart the system')
+            send_email()
+            
+        else:
+            print('Operations seem correct')
+        time.sleep(3600)
+
+
+
+    
 
 if __name__ == '__main__':
 
@@ -651,7 +728,7 @@ if __name__ == '__main__':
     wd_path = '/home/mpotts32/weather/'
 
     ###########################################################
-
+    
 
     ################# Database intinitation ###################
 
@@ -677,11 +754,22 @@ if __name__ == '__main__':
     ################ Runs the two processes ###################
     p1=multiprocessing.Process(target=check_all_files)
     p2= multiprocessing.Process(target=continous_upload)
+    p3 = multiprocessing.Process(target = check_weatherstation_operations)
 
     # start both processes
-    p1.start()
     p2.start()
+    
+    
+    p1.start()
+
+    p1.join()
+    time.sleep(1.5)
+    p3.start()
+    
+    
 
     # wait for both processes to finish
-    p1.join()
+    
     p2.join()
+    p3.join()
+  
