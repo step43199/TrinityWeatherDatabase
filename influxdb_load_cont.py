@@ -229,6 +229,13 @@ def remove_incomplete_lines(f_path, num_col):
         writer = csv.writer(output_file)
         writer.writerows(valid_lines)
 
+#
+def correct_wind_direction(angle):
+    result = angle - 180
+    if result < 0:
+        result += 360  # Add 360 to make it positive
+    return result
+
 # Read the file into a pandas DataFrame
 # Takes: a single file
 # Returns: Dataframe
@@ -269,7 +276,7 @@ def mak_df(file):
     df['RelativeGustSpeed'].fillna(float(0),inplace= True)
 
     df['AverageCorrectedWindDirection'].fillna(float(0),inplace= True)
-
+    df['AverageCorrectedWindDirection'] = (df['AverageCorrectedWindDirection']+180)%360
     df['WindSensorStatus'].fillna(int(0),inplace= True)
     df['Pressure'].fillna(float(0),inplace= True)
     df['Pressure_at_Sea_level'].fillna(float(0),inplace= True)
@@ -310,7 +317,7 @@ def mak_df(file):
 
 
 
-    #print(df.loc[:,"DateTime"])
+    #print(df.loc[:,""])
     return df
 
 # Create a list/dictionary of data points from the DataFrame this is needed to uplaod to influxdb
@@ -473,11 +480,18 @@ def quick_check_files(file,ment):
 # Takes: datapoints and measurement
 # return: the whole set of datapoints, and empty array, the subset of datapoints that need to be uploaded
 def get_lines_after_ltimedb(dps,ment):
+
     ltimedb = query_ment_ltimedb(ment)
 
-    ltimedps = dps_ment_ltimedps(dps)
 
+    ltimedps = dps_ment_ltimedps(dps)
+    
+    #print(ltimedb)
+    #print(ltimedps)
+    #print(len(dps))
     if ltimedb == 0:
+        #print('hey,hey')
+        #print(len(dps))
         return dps # if there is no time then the whole set of datapoints is sent to upload
 
     elif ltimedps == ltimedb: # nothing new to uplaod
@@ -492,15 +506,17 @@ def get_lines_after_ltimedb(dps,ment):
         print(f'db: {ltimedb} and file: {ltimedps}')
         ltimedps=ltimedps.to_pydatetime() # makes it a datetime.object
 
-
-        
-
-
         #dps1 = list(dps)
         # goes through all the datapoints and gets just the times and gets the datapoints that need to be uploaded
+        #print(dps[0]['time'])
         for i in range(len(dps)):
-            times = str(dps[i])[77:103]
-            if times == str(ltimedb):
+
+            times = dps[i]['time']
+            times = times.to_pydatetime()
+            #print(times,ltimedb)
+            #print(type(times))
+            #print(type(ltimedb))
+            if times == ltimedb:
                 #print(times)
                 #print(f'row matching is {i}')
                 r_upload = dps[i:] 
@@ -573,11 +589,12 @@ def check_all_files():
                 
                 try:
                     upload_data(upload_points,ment)
-                except:
+                except Exception as e:
                     
                     query = f'DROP MEASUREMENT "{ment}"'
                     client.query(query)
                     upload_data(data_points, ment)
+                    print(e)
                         
             else:
                 print(f'A--{ment} is a blank file')
@@ -614,37 +631,39 @@ def continous_upload():
         print("C--ment", ment) # second processes
         upload_points=get_lines_after_ltimedb(data_points,ment) # points that need to be uploaded
         print(f'C--Time to load whole file {time.time()-t0}')
-        try:
-            if len(upload_points) ==0: # if ther points =0 wait a little bit
-                time.sleep(56)
+        # try:
+        #print(upload_points)
+        if len(upload_points) ==0: # if ther points =0 wait a little bit
+            time.sleep(56)
 
-            else: 
-                t0 = time.time()
-                batch_size = 5000 # uploads in a max of 5000 lines
-                for i in range(0, len(upload_points), batch_size):
-        
-                    batch = upload_points[i:i+batch_size] # created the points to upload
-                    print(f'C--batch size {len(batch)}')
-                    try: 
-                        client.write_points(points=batch) # writes points to the database
-                    except:
-                        query = f'DROP MEASUREMENT "{ment}"'
-                        client.query(query)
-                        print('Please wait an error in loading occred should be resolved in 1 minute')
+
+        else: 
+            t0 = time.time()
+            batch_size = 5000 # uploads in a max of 5000 lines
+            for i in range(0, len(upload_points), batch_size):
+    
+                batch = upload_points[i:i+batch_size] # created the points to upload
+                print(f'C--batch size {len(batch)}')
+                try: 
+                    client.write_points(points=batch) # writes points to the database
+                except Exception as e:
+                    query = f'DROP MEASUREMENT "{ment}"'
+                    client.query(query)
+                    print('Please wait an error in loading occred should be resolved in 1 minute')
+                
                     
-                        
-                    #client.write_points(points=batch) # uploads to database
-                    #print(f'C--Time to upload {time.time()-t0}')
-                time.sleep(56) # wait a bit
-                    
-            err = 0 # resets the error
+                #client.write_points(points=batch) # uploads to database
+                #print(f'C--Time to upload {time.time()-t0}')
+            time.sleep(56) # wait a bit
+                
+        err = 0 # resets the error
             
-        except Exception as e:
+        # except Exception as e:
             
-            print(f'C--Error Uploading: {e} at time {time.time()}')
-            # maybe make this a file in the future
-            err =+ 1 # updates the error occured if 5 happen then the program will stop
-            time.sleep(60) # the system waits a minute to continue
+        #     print(f'C--Error Uploading: {e} at time {time.time()}')
+        #     # maybe make this a file in the future
+        #     err =+ 1 # updates the error occured if 5 happen then the program will stop
+        #     time.sleep(60) # the system waits a minute to continue
  
 
 def send_email():
@@ -708,7 +727,7 @@ def check_weatherstation_operations():
             len_df = 0
 
         expected_lines = current.hour * 3600 + 1 # alwasy have some times
-
+        
         if len_df < expected_lines:
             print('restart the system')
             send_email()
